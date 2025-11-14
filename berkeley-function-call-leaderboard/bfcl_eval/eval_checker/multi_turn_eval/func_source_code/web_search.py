@@ -7,7 +7,6 @@ from urllib.parse import urlparse
 import html2text
 import requests
 from bs4 import BeautifulSoup
-from serpapi import GoogleSearch
 
 ERROR_TEMPLATES = [
     "503 Server Error: Service Unavailable for url: {url}",
@@ -29,18 +28,17 @@ ERROR_TEMPLATES = [
 
 class WebSearchAPI:
     def __init__(self):
-        self._api_description = "This tool belongs to the Web Search API category. It provides functions to search the web and browse search results."
+        self._api_description = (
+            "This tool belongs to the Web Search API category. "
+            "It provides functions to search the web and browse search results."
+        )
         self.show_snippet = True
-        # Note: The following two random generators are used to simulate random errors, but that feature is not currently used
-        # This one used to determine if we should simulate a random error
-        # Outcome (True means simulate error): [True, False, True, True, False, True, True, True, False, False, True, True, False, True, False, False, False, False, False, True]
+        # Random generators (kept for compatibility with your error simulation)
         self._random = random.Random(337)
-        # This one is used to determine the content of the error message
         self._rng = random.Random(1053)
 
     def _load_scenario(self, initial_config: dict, long_context: bool = False):
         # We don't care about the long_context parameter here
-        # It's there to match the signature of functions in the multi-turn evaluation code
         self.show_snippet = initial_config["show_snippet"]
 
     def search_engine_query(
@@ -50,160 +48,123 @@ class WebSearchAPI:
         region: Optional[str] = "wt-wt",
     ) -> list:
         """
-        This function queries the search engine for the provided keywords and region.
+        This function queries the search engine for the provided keywords and region,
+        using the Serper API under the hood.
 
         Args:
             keywords (str): The keywords to search for.
             max_results (int, optional): The maximum number of search results to return. Defaults to 10.
-            region (str, optional): The region to search in. Defaults to "wt-wt". Possible values include:
-                - xa-ar for Arabia
-                - xa-en for Arabia (en)
-                - ar-es for Argentina
-                - au-en for Australia
-                - at-de for Austria
-                - be-fr for Belgium (fr)
-                - be-nl for Belgium (nl)
-                - br-pt for Brazil
-                - bg-bg for Bulgaria
-                - ca-en for Canada
-                - ca-fr for Canada (fr)
-                - ct-ca for Catalan
-                - cl-es for Chile
-                - cn-zh for China
-                - co-es for Colombia
-                - hr-hr for Croatia
-                - cz-cs for Czech Republic
-                - dk-da for Denmark
-                - ee-et for Estonia
-                - fi-fi for Finland
-                - fr-fr for France
-                - de-de for Germany
-                - gr-el for Greece
-                - hk-tzh for Hong Kong
-                - hu-hu for Hungary
-                - in-en for India
-                - id-id for Indonesia
-                - id-en for Indonesia (en)
-                - ie-en for Ireland
-                - il-he for Israel
-                - it-it for Italy
-                - jp-jp for Japan
-                - kr-kr for Korea
-                - lv-lv for Latvia
-                - lt-lt for Lithuania
-                - xl-es for Latin America
-                - my-ms for Malaysia
-                - my-en for Malaysia (en)
-                - mx-es for Mexico
-                - nl-nl for Netherlands
-                - nz-en for New Zealand
-                - no-no for Norway
-                - pe-es for Peru
-                - ph-en for Philippines
-                - ph-tl for Philippines (tl)
-                - pl-pl for Poland
-                - pt-pt for Portugal
-                - ro-ro for Romania
-                - ru-ru for Russia
-                - sg-en for Singapore
-                - sk-sk for Slovak Republic
-                - sl-sl for Slovenia
-                - za-en for South Africa
-                - es-es for Spain
-                - se-sv for Sweden
-                - ch-de for Switzerland (de)
-                - ch-fr for Switzerland (fr)
-                - ch-it for Switzerland (it)
-                - tw-tzh for Taiwan
-                - th-th for Thailand
-                - tr-tr for Turkey
-                - ua-uk for Ukraine
-                - uk-en for United Kingdom
-                - us-en for United States
-                - ue-es for United States (es)
-                - ve-es for Venezuela
-                - vn-vi for Vietnam
-                - wt-wt for No region
+            region (str, optional): The region to search in. Defaults to "wt-wt".
 
         Returns:
-            list: A list of search result dictionaries, each containing information such as:
+            list: A list of search result dictionaries, each containing:
             - 'title' (str): The title of the search result.
             - 'href' (str): The URL of the search result.
             - 'body' (str): A brief description or snippet from the search result.
+
+            Or, on error:
+            - {'error': '<error message>'}
         """
+        api_key = os.getenv("SERPER_API_KEY")
+        if not api_key:
+            return {
+                "error": "SERPER_API_KEY environment variable is not set. "
+                         "Please set it to your Serper API key."
+            }
+
         backoff = 2  # initial back-off in seconds
-        params = {
-            "engine": "duckduckgo",
-            "q": keywords,
-            "kl": region,
-            "api_key": os.getenv("SERPAPI_API_KEY"),
+
+        # Serper basic payload
+        payload = {"q": keywords}
+
+        # Best-effort use of `region` as Serper's `location` parameter
+        # (You can map your region codes to human-readable locations if you like.)
+        if region and region != "wt-wt":
+            payload["location"] = region
+
+        headers = {
+            "X-API-KEY": api_key,
+            "Content-Type": "application/json",
         }
 
-        # Infinite retry loop with exponential backoff
+        # Infinite retry loop with exponential backoff for 429
         while True:
             try:
-                search = GoogleSearch(params)
-                search_results = search.get_dict()
+                response = requests.post(
+                    "https://google.serper.dev/search",
+                    headers=headers,
+                    json=payload,
+                    timeout=20,
+                )
             except Exception as e:
-                # If the underlying HTTP call raised a 429 we retry, otherwise propagate
-                if "429" in str(e):
-                    wait_time = backoff + random.uniform(0, backoff)
-                    error_block = (
-                        "*" * 100
-                        + f"\n❗️❗️ [WebSearchAPI] Received 429 from SerpAPI. The number of requests sent using this API key exceeds the hourly throughput limit OR your account has run out of searches. Retrying in {wait_time:.1f} seconds…"
-                        + "*" * 100
-                    )
-                    print(error_block)
-                    time.sleep(wait_time)
-                    backoff = min(backoff * 2, 120)  # cap the back-off
-                    continue
-                else:
-                    error_block = (
-                        "*" * 100
-                        + f"\n❗️❗️ [WebSearchAPI] Error from SerpAPI: {str(e)}. This is not a rate-limit error, so it will not be retried."
-                        + "*" * 100
-                    )
-                    print(error_block)
-                    return {"error": str(e)}
-
-            # SerpAPI sometimes returns the error in the payload instead of raising
-            if "error" in search_results and "429" in str(search_results["error"]):
-                wait_time = backoff + random.uniform(0, backoff)
+                # Network / transport-level error
                 error_block = (
                     "*" * 100
-                    + f"\n❗️❗️ [WebSearchAPI] Received 429 from SerpAPI. The number of requests sent using this API key exceeds the hourly throughput limit OR your account has run out of searches. Retrying in {wait_time:.1f} seconds…"
+                    + f"\n❗️❗️ [WebSearchAPI] Error calling Serper API: {str(e)}. "
+                      "This is not a rate-limit error, so it will not be retried."
                     + "*" * 100
                 )
                 print(error_block)
+                return {"error": f"Error calling Serper API: {str(e)}"}
+
+            # Handle HTTP 429 with exponential backoff
+            if response.status_code == 429:
+                wait_time = backoff + random.uniform(0, backoff)
+                error_block = (
+                    "*" * 100
+                    + "\n❗️❗️ [WebSearchAPI] Received 429 from Serper API. "
+                      "The number of requests sent using this API key exceeds your rate/budget. "
+                      f"Retrying in {wait_time:.1f} seconds…"
+                    + "\n" + "*" * 100
+                )
+                print(error_block)
                 time.sleep(wait_time)
-                backoff = min(backoff * 2, 120)
+                backoff = min(backoff * 2, 120)  # cap the back-off
                 continue
 
-            break  # Success – no rate-limit error detected
+            # Any other non-success response: return as error, no retry
+            if not response.ok:
+                return {
+                    "error": f"Serper API returned HTTP {response.status_code}: {response.text}"
+                }
 
-        if "organic_results" not in search_results:
+            # Successful response
+            try:
+                search_results = response.json()
+            except ValueError as e:
+                return {"error": f"Failed to parse JSON from Serper API: {str(e)}"}
+
+            break
+
+        # Serper returns organic results under the 'organic' key
+        if "organic" not in search_results:
             return {
                 "error": "Failed to retrieve the search results from server. Please try again later."
             }
 
-        search_results = search_results["organic_results"]
+        organic_results = search_results["organic"]
 
-        # Convert the search results to the desired format
+        # Convert to your existing format:
+        #   [{'title': ..., 'href': ..., 'body': ...}, ...]
         results = []
-        for result in search_results[:max_results]:
+        for result in organic_results[:max_results]:
+            title = result.get("title", "")
+            link = result.get("link", "")
+            snippet = result.get("snippet", "")
+
             if self.show_snippet:
                 results.append(
                     {
-                        "title": result["title"],
-                        "href": result["link"],
-                        "body": result["snippet"],
+                        "title": title,
+                        "href": link,
+                        "body": snippet,
                     }
                 )
             else:
                 results.append(
                     {
-                        "title": result["title"],
-                        "href": result["link"],
+                        "title": title,
+                        "href": link,
                     }
                 )
 
@@ -225,8 +186,6 @@ class WebSearchAPI:
             raise ValueError(f"Invalid URL: {url}")
 
         try:
-            # A header that mimics a browser request. This helps avoid 403 Forbidden errors.
-            # TODO: Is this the best way to do this?
             headers = {
                 "User-Agent": (
                     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -250,12 +209,6 @@ class WebSearchAPI:
             response = requests.get(url, headers=headers, timeout=20, allow_redirects=True)
             response.raise_for_status()
 
-            # Note: Un-comment this when we want to simulate a random error
-            # Flip a coin to simulate a random error
-            # if self._random.random() < 0.95:
-            #     return {"error": self._fake_requests_get_error_msg(url)}
-
-            # Process the response based on the mode
             if mode == "raw":
                 return {"content": response.text}
 
@@ -282,7 +235,7 @@ class WebSearchAPI:
 
     def _fake_requests_get_error_msg(self, url: str) -> str:
         """
-        Return a realistic‑looking requests/urllib3 error message.
+        Return a realistic-looking requests/urllib3 error message.
         """
         parsed = urlparse(url)
 
