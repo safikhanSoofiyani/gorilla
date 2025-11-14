@@ -63,6 +63,7 @@ from bfcl_eval.model_handler.local_inference.salesforce_qwen import (
     SalesforceQwenHandler,
 )
 from bfcl_eval.model_handler.local_inference.think_agent import ThinkAgentHandler
+from bfcl_eval.model_handler.local_inference.sarvamm import SarvamMHandler
 
 # -----------------------------------------------------------------------------
 # A mapping of model identifiers to their respective model configurations.
@@ -1124,6 +1125,18 @@ api_inference_model_map = {
 
 # Inference through local hosting
 local_inference_model_map = {
+    "sarvamai/sarvam-m": ModelConfig(
+        model_name="sarvamai/sarvam-m",
+        display_name="Sarvam-M (Prompt) (Local)",
+        url="https://huggingface.co/sarvamai/sarvam-m",
+        org="Sarvamai",
+        license="Apache-2.0",
+        model_handler=SarvamMHandler,
+        input_price=None,
+        output_price=None,
+        is_fc_model=False,
+        underscore_to_dot=False,
+    ),
     "deepseek-ai/DeepSeek-R1": ModelConfig(
         model_name="deepseek-ai/DeepSeek-R1",
         display_name="DeepSeek-R1 (Prompt) (Local)",
